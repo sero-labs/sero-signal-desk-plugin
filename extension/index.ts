@@ -1,12 +1,12 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { StringEnum, Type, type Static } from '@mariozechner/pi-ai';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { Text } from '@mariozechner/pi-tui';
 
 import { parseArticlesFromFeed } from '../shared/feed-parser';
-import { hash, reclusterArticles } from '../shared/intelligence';
+import { reclusterArticles } from '../shared/intelligence';
 import { inferSourceKind } from '../shared/source-helpers';
+import { readSignalDeskState, SignalDeskStateReadError, writeSignalDeskState } from './state-io';
 import type {
   Article,
   BriefingStyle,
@@ -20,7 +20,7 @@ import type {
   Watchlist,
   WatchlistType,
 } from '../shared/types';
-import { createId, DEFAULT_STATE, normaliseState } from '../shared/types';
+import { createId } from '../shared/types';
 
 const STATE_REL_PATH = path.join('.sero', 'apps', 'signal-desk', 'state.json');
 const ACTIONS = [
@@ -86,28 +86,20 @@ function resolveStatePath(cwd: string): string {
   return path.join(cwd, STATE_REL_PATH);
 }
 
-async function readState(filePath: string): Promise<SignalDeskState> {
-  try {
-    const raw = await fs.readFile(filePath, 'utf8');
-    return normaliseState(JSON.parse(raw) as Partial<SignalDeskState>);
-  } catch {
-    return normaliseState(DEFAULT_STATE);
-  }
-}
-
-async function writeState(filePath: string, state: SignalDeskState): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.tmp.${Date.now()}`;
-  await fs.writeFile(tmpPath, JSON.stringify(state, null, 2), 'utf8');
-  await fs.rename(tmpPath, filePath);
-}
-
 function now(): string {
   return new Date().toISOString();
 }
 
-function textResult(text: string, details: Record<string, unknown> = {}) {
-  return { content: [{ type: 'text' as const, text }], details };
+function textResult(text: string, details: Record<string, unknown> = {}, isError = false) {
+  return { content: [{ type: 'text' as const, text }], details, isError };
+}
+
+function stateReadErrorResult(error: SignalDeskStateReadError) {
+  return textResult(
+    `Error: ${error.message}. Signal Desk did not write a new state file; repair or restore the existing state before retrying.`,
+    { statePath: error.statePath, reason: error.reason },
+    true,
+  );
 }
 
 async function fetchSource(source: FeedSource, state: SignalDeskState): Promise<Article[]> {
@@ -197,7 +189,13 @@ export default function (pi: ExtensionAPI) {
       const resolvedPath = ctx ? resolveStatePath(ctx.cwd) : statePath;
       if (!resolvedPath) return textResult('Error: no workspace cwd');
       statePath = resolvedPath;
-      const state = await readState(statePath);
+      let state: SignalDeskState;
+      try {
+        state = await readSignalDeskState(statePath);
+      } catch (error) {
+        if (error instanceof SignalDeskStateReadError) return stateReadErrorResult(error);
+        throw error;
+      }
 
       if (params.action === 'status') {
         return textResult(`Signal Desk: ${state.sources.length} sources, ${state.watchlists.length} watchlists, ${state.articles.length} articles, ${state.clusters.length} clusters, ${state.clusters.filter((c) => c.importance >= 75).length} high-signal stories.`, { state });
@@ -205,7 +203,7 @@ export default function (pi: ExtensionAPI) {
       if (params.action === 'add_source') {
         if (!params.name || !params.url) return textResult('Error: name and url are required.');
         const source: FeedSource = { id: createId(state, 'src'), name: params.name, url: params.url, kind: (params.kind as SourceKind) ?? inferSourceKind(params.url), category: params.category, enabled: params.enabled ?? true, createdAt: now(), updatedAt: now() };
-        state.sources.push(source); await writeState(statePath, state); return textResult(`Added source ${source.name}.`, { source });
+        state.sources.push(source); await writeSignalDeskState(statePath, state); return textResult(`Added source ${source.name}.`, { source });
       }
       if (params.action === 'update_source') {
         if (!params.id) return textResult('Error: id is required.');
@@ -215,19 +213,19 @@ export default function (pi: ExtensionAPI) {
         if (params.url) { source.url = params.url; source.kind = (params.kind as SourceKind) ?? inferSourceKind(params.url); }
         if (params.category !== undefined) source.category = params.category;
         if (params.enabled !== undefined) source.enabled = params.enabled;
-        source.updatedAt = now(); await writeState(statePath, state); return textResult(`Updated source ${source.name}.`, { source });
+        source.updatedAt = now(); await writeSignalDeskState(statePath, state); return textResult(`Updated source ${source.name}.`, { source });
       }
       if (params.action === 'remove_source') {
         if (!params.id) return textResult('Error: id is required.');
         state.sources = state.sources.filter((source) => source.id !== params.id);
         state.watchlists = state.watchlists.map((watchlist) => ({ ...watchlist, sourceIds: watchlist.sourceIds.filter((id) => id !== params.id) }));
         state.articles = state.articles.filter((article) => article.sourceId !== params.id);
-        recluster(state); await writeState(statePath, state); return textResult(`Removed source ${params.id}.`);
+        recluster(state); await writeSignalDeskState(statePath, state); return textResult(`Removed source ${params.id}.`);
       }
       if (params.action === 'add_watchlist') {
         if (!params.name || !params.keywords?.length) return textResult('Error: name and keywords are required.');
         const watchlist: Watchlist = { id: createId(state, 'watch'), name: params.name, type: (params.type as WatchlistType) ?? 'topic', keywords: params.keywords, sourceIds: params.sourceIds ?? [], priority: (params.priority as Priority) ?? 'normal', enabled: params.enabled ?? true, createdAt: now(), updatedAt: now() };
-        state.watchlists.push(watchlist); await writeState(statePath, state); return textResult(`Added watchlist ${watchlist.name}.`, { watchlist });
+        state.watchlists.push(watchlist); await writeSignalDeskState(statePath, state); return textResult(`Added watchlist ${watchlist.name}.`, { watchlist });
       }
       if (params.action === 'update_watchlist') {
         if (!params.id) return textResult('Error: id is required.');
@@ -239,16 +237,16 @@ export default function (pi: ExtensionAPI) {
         if (params.sourceIds) watchlist.sourceIds = params.sourceIds;
         if (params.priority) watchlist.priority = params.priority as Priority;
         if (params.enabled !== undefined) watchlist.enabled = params.enabled;
-        watchlist.updatedAt = now(); await writeState(statePath, state); return textResult(`Updated watchlist ${watchlist.name}.`, { watchlist });
+        watchlist.updatedAt = now(); await writeSignalDeskState(statePath, state); return textResult(`Updated watchlist ${watchlist.name}.`, { watchlist });
       }
       if (params.action === 'remove_watchlist') {
         if (!params.id) return textResult('Error: id is required.');
         state.watchlists = state.watchlists.filter((watchlist) => watchlist.id !== params.id);
         state.articles = state.articles.map((article) => ({ ...article, matchedWatchlistIds: article.matchedWatchlistIds.filter((id) => id !== params.id) }));
-        recluster(state); await writeState(statePath, state); return textResult(`Removed watchlist ${params.id}.`);
+        recluster(state); await writeSignalDeskState(statePath, state); return textResult(`Removed watchlist ${params.id}.`);
       }
       if (params.action === 'seed_demo') {
-        const msg = seedDemo(state); await writeState(statePath, state); return textResult(msg, { state });
+        const msg = seedDemo(state); await writeSignalDeskState(statePath, state); return textResult(msg, { state });
       }
       if (params.action === 'refresh') {
         const sourceIds = params.sourceIds?.length ? params.sourceIds : state.sources.filter((s) => s.enabled).map((s) => s.id);
@@ -272,7 +270,7 @@ export default function (pi: ExtensionAPI) {
         run.finishedAt = now(); run.clustersAdded = Math.max(0, state.clusters.length - beforeClusters);
         run.status = (run.sourcesFetched ?? 0) === 0 ? 'error' : (run.sourcesFailed ?? 0) > 0 ? 'partial' : 'success';
         run.error = run.status === 'error' ? (run.errors ?? []).join('; ') || 'No sources fetched' : undefined;
-        await writeState(statePath, state); return textResult(`Refresh ${run.status}: ${run.articlesAdded} new articles, ${run.clustersAdded} new clusters, ${run.sourcesFetched ?? 0}/${sourceIds.length} sources fetched.`, { run });
+        await writeSignalDeskState(statePath, state); return textResult(`Refresh ${run.status}: ${run.articlesAdded} new articles, ${run.clustersAdded} new clusters, ${run.sourcesFetched ?? 0}/${sourceIds.length} sources fetched.`, { run });
       }
       if (params.action === 'list_articles') {
         const items = state.articles.filter((a) => !params.status || a.status === params.status as ItemStatus).filter((a) => !params.query || `${a.title} ${a.snippet ?? ''}`.toLowerCase().includes(params.query.toLowerCase())).slice(0, params.limit ?? 20);
@@ -293,10 +291,10 @@ export default function (pi: ExtensionAPI) {
         const cluster = state.clusters.find((c) => c.id === params.clusterId);
         if (!cluster) return textResult('Error: clusterId not found.');
         cluster.summary = { text: params.body, generatedAt: now(), style: (params.style as BriefingStyle) ?? state.settings.defaultBriefingStyle };
-        await writeState(statePath, state); return textResult(`Saved summary for ${cluster.headline}.`, { cluster });
+        await writeSignalDeskState(statePath, state); return textResult(`Saved summary for ${cluster.headline}.`, { cluster });
       }
       if (params.action === 'recluster') {
-        recluster(state); await writeState(statePath, state); return textResult(`Reclustered ${state.articles.length} articles into ${state.clusters.length} stories.`, { clusters: state.clusters });
+        recluster(state); await writeSignalDeskState(statePath, state); return textResult(`Reclustered ${state.articles.length} articles into ${state.clusters.length} stories.`, { clusters: state.clusters });
       }
       if (params.action === 'merge_clusters') {
         const ids = params.clusterIds ?? [];
@@ -307,7 +305,7 @@ export default function (pi: ExtensionAPI) {
         const primary = clusters.sort((a, b) => b.importance - a.importance)[0]!;
         primary.articleIds = articleIds; primary.matchedWatchlistIds = [...new Set(clusters.flatMap((cluster) => cluster.matchedWatchlistIds))]; primary.tags = [...new Set(clusters.flatMap((cluster) => cluster.tags))]; primary.importance = Math.max(...clusters.map((cluster) => cluster.importance)); primary.latestSeenAt = clusters.sort((a, b) => b.latestSeenAt.localeCompare(a.latestSeenAt))[0]!.latestSeenAt;
         state.clusters = [primary, ...state.clusters.filter((cluster) => !ids.includes(cluster.id))].sort((a, b) => b.importance - a.importance);
-        await writeState(statePath, state); return textResult(`Merged ${ids.length} clusters into ${primary.id}.`, { cluster: primary });
+        await writeSignalDeskState(statePath, state); return textResult(`Merged ${ids.length} clusters into ${primary.id}.`, { cluster: primary });
       }
       if (params.action === 'split_cluster') {
         if (!params.clusterId) return textResult('Error: clusterId is required.');
@@ -315,24 +313,24 @@ export default function (pi: ExtensionAPI) {
         if (!cluster) return textResult('Error: clusterId not found.');
         const articles = cluster.articleIds.map((id) => state.articles.find((article) => article.id === id)).filter(Boolean) as Article[];
         state.clusters = [...state.clusters.filter((item) => item.id !== cluster.id), ...reclusterArticles(articles, [])].sort((a, b) => b.importance - a.importance);
-        await writeState(statePath, state); return textResult(`Split ${cluster.id} into ${articles.length} article-level clusters.`, { clusters: state.clusters });
+        await writeSignalDeskState(statePath, state); return textResult(`Split ${cluster.id} into ${articles.length} article-level clusters.`, { clusters: state.clusters });
       }
       if (params.action === 'briefing') return textResult(buildBriefing(state, params), { clusters: state.clusters.slice(0, params.limit ?? 8) });
       if (params.action === 'save_insight') {
         if (!params.title || !params.body) return textResult('Error: title and body are required.');
         const insight = { id: createId(state, 'ins'), title: params.title, body: params.body, articleIds: params.articleIds ?? [], clusterIds: params.clusterIds ?? [], tags: params.tags ?? [], createdAt: now(), updatedAt: now() };
-        state.insights.unshift(insight); await writeState(statePath, state); return textResult(`Saved insight: ${insight.title}`, { insight });
+        state.insights.unshift(insight); await writeSignalDeskState(statePath, state); return textResult(`Saved insight: ${insight.title}`, { insight });
       }
       if (params.action === 'create_action') {
         if (!params.title) return textResult('Error: title is required.');
         const action: SignalAction = { id: createId(state, 'act'), title: params.title, description: params.description, articleIds: params.articleIds ?? [], clusterIds: params.clusterIds ?? [], insightIds: params.insightIds ?? [], priority: (params.priority as Priority) ?? 'normal', status: 'open', createdAt: now(), updatedAt: now() };
-        state.actions.unshift(action); await writeState(statePath, state); return textResult(`Created action: ${action.title}`, { action });
+        state.actions.unshift(action); await writeSignalDeskState(statePath, state); return textResult(`Created action: ${action.title}`, { action });
       }
       if (params.action === 'mark') {
         const status = (params.status ?? 'seen') as ItemStatus;
         state.articles = state.articles.map((a) => params.articleIds?.includes(a.id) ? { ...a, status } : a);
         state.clusters = state.clusters.map((c) => params.clusterIds?.includes(c.id) ? { ...c, status } : c);
-        await writeState(statePath, state); return textResult(`Marked selected items as ${status}.`);
+        await writeSignalDeskState(statePath, state); return textResult(`Marked selected items as ${status}.`);
       }
       return textResult(`Unknown action: ${params.action}`);
     },
