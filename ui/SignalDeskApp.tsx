@@ -1,14 +1,17 @@
-import { Component, type ButtonHTMLAttributes, type Context, type ReactNode } from 'react';
-import { dailyDigest, highSignalNotifications } from '../shared/advanced-intelligence';
+import { Component, type Context } from 'react';
+import { highSignalNotifications } from '../shared/advanced-intelligence';
 import { exportOpml } from '../shared/opml';
-import actionsScreenshot from './guide-assets/actions.png';
-import briefingScreenshot from './guide-assets/briefing.png';
-import insightsScreenshot from './guide-assets/insights.png';
-import settingsScreenshot from './guide-assets/settings.png';
-import streamScreenshot from './guide-assets/stream.png';
 import { createGithubReleasesSource, createGoogleNewsSource, createHackerNewsNewestSource, inferSourceKind } from '../shared/source-helpers';
-import type { ActiveView, FeedSource, SignalDeskState, Watchlist } from '../shared/types';
+import type { ActiveView, SignalDeskState, Watchlist } from '../shared/types';
 import { createId, DEFAULT_STATE, normaliseState } from '../shared/types';
+import { ActionsPanel } from './components/ActionsPanel';
+import { BriefingPanel, EmptyState } from './components/BriefingPanel';
+import { Button } from './components/Button';
+import { ClusterList } from './components/ClusterList';
+import { HelpGuide } from './components/HelpGuide';
+import { InsightsPanel } from './components/InsightsPanel';
+import { SelectedStory } from './components/SelectedStory';
+import { SettingsPanel } from './components/SettingsPanel';
 import './styles.css';
 
 type AppContextValue = {
@@ -45,25 +48,6 @@ function getSero(): SeroGlobal {
 
 function currentTime(): string {
   return new Date().toISOString();
-}
-
-function sourceName(source: FeedSource | undefined): string {
-  return source?.name ?? 'Unknown source';
-}
-
-function formatDate(value: string | undefined): string {
-  if (!value) return 'undated';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
-}
-
-function watchlistNames(ids: string[], state: SignalDeskState): string {
-  return ids.map((id) => state.watchlists.find((watchlist) => watchlist.id === id)?.name).filter(Boolean).join(', ') || 'No watchlist match';
-}
-
-function Button({ children, className = '', size = 'default', variant = 'primary', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode; size?: 'default' | 'sm'; variant?: 'primary' | 'secondary' | 'ghost'; }) {
-  return <button className={`sd-button ${size} ${variant} ${className}`.trim()} {...props}>{children}</button>;
 }
 
 type SignalDeskComponentState = {
@@ -126,8 +110,7 @@ export class SignalDeskApp extends Component<Record<string, never>, SignalDeskCo
     const writeId = this.writeId + 1;
     this.writeId = writeId;
     this.setState({ rawState: next });
-    const sero = getSero();
-    sero.appState.write(ctx.stateFilePath, next).catch((error) => {
+    getSero().appState.write(ctx.stateFilePath, next).catch((error) => {
       if (writeId === this.writeId) {
         console.warn(`[Signal Desk] Failed to persist app state for ${ctx.stateFilePath}`, error);
         this.setState({ rawState: previous });
@@ -291,7 +274,6 @@ export class SignalDeskApp extends Component<Record<string, never>, SignalDeskCo
     const selectedCluster = state.clusters.find((cluster) => cluster.id === state.ui.selectedClusterId) ?? filteredClusters[0];
     const highSignal = state.clusters.filter((cluster) => cluster.importance >= 75).length;
     const latestRun = state.runs[0];
-
     const failedCount = state.sources.filter((source) => source.lastError).length;
 
     return (
@@ -314,416 +296,61 @@ export class SignalDeskApp extends Component<Record<string, never>, SignalDeskCo
         {this.state.showGuide ? (
           <HelpGuide onBack={() => this.setState({ showGuide: false })} />
         ) : (
-        <main className="desk-grid">
-          <aside className="watch-rail">
-            <div className="rail-head">
-              <div className="rail-title">Watchlists</div>
-              <button className="rail-add" onClick={() => this.setState({ showAddWatchlist: !this.state.showAddWatchlist })} title="Add watchlist">{this.state.showAddWatchlist ? '×' : '+'}</button>
-            </div>
-            {this.state.showAddWatchlist ? (
-              <div className="quick-add">
-                <input value={this.state.watchDraft.name} onChange={(event) => this.setState({ watchDraft: { ...this.state.watchDraft, name: event.target.value } })} placeholder="Name (e.g. AI Agents)" />
-                <input value={this.state.watchDraft.keywords} onChange={(event) => this.setState({ watchDraft: { ...this.state.watchDraft, keywords: event.target.value } })} placeholder="Keywords, comma separated" />
-                <Button size="sm" variant="secondary" onClick={() => { this.addWatchlist(); this.setState({ showAddWatchlist: false }); }}>Add radar</Button>
+          <main className="desk-grid">
+            <aside className="watch-rail">
+              <div className="rail-head">
+                <div className="rail-title">Watchlists</div>
+                <button className="rail-add" onClick={() => this.setState({ showAddWatchlist: !this.state.showAddWatchlist })} title="Add watchlist">{this.state.showAddWatchlist ? '×' : '+'}</button>
               </div>
-            ) : null}
-            <div className="watch-rail-scroll">
-              <button className={!selectedWatchlist ? 'watch-item active' : 'watch-item'} onClick={() => this.setSelectedWatchlist(undefined)}><span>All Signal</span><b>{state.clusters.length}</b></button>
-              {state.watchlists.map((watchlist) => {
-                const count = state.clusters.filter((cluster) => cluster.matchedWatchlistIds.includes(watchlist.id)).length;
-                return (
-                  <div key={watchlist.id} className={selectedWatchlist === watchlist.id ? 'watch-row active' : 'watch-row'}>
-                    <button className="watch-item" onClick={() => this.setSelectedWatchlist(watchlist.id)}>
-                      <span><i className={`dot ${watchlist.priority}${watchlist.enabled ? '' : ' off'}`} />{watchlist.name}</span>
-                      <b>{count}</b>
-                    </button>
-                    <div className="watch-row-actions">
-                      <button className="mini-action" title="Edit" onClick={() => this.editWatchlist(watchlist.id)}>✎</button>
-                      <button className="mini-action" title={watchlist.enabled ? 'Disable' : 'Enable'} onClick={() => this.toggleWatchlist(watchlist.id)}>{watchlist.enabled ? '◉' : '○'}</button>
-                      <button className="mini-action danger" title="Remove" onClick={() => this.removeWatchlist(watchlist.id)}>×</button>
+              {this.state.showAddWatchlist ? (
+                <div className="quick-add">
+                  <input value={this.state.watchDraft.name} onChange={(event) => this.setState({ watchDraft: { ...this.state.watchDraft, name: event.target.value } })} placeholder="Name (e.g. AI Agents)" />
+                  <input value={this.state.watchDraft.keywords} onChange={(event) => this.setState({ watchDraft: { ...this.state.watchDraft, keywords: event.target.value } })} placeholder="Keywords, comma separated" />
+                  <Button size="sm" variant="secondary" onClick={() => { this.addWatchlist(); this.setState({ showAddWatchlist: false }); }}>Add radar</Button>
+                </div>
+              ) : null}
+              <div className="watch-rail-scroll">
+                <button className={!selectedWatchlist ? 'watch-item active' : 'watch-item'} onClick={() => this.setSelectedWatchlist(undefined)}><span>All Signal</span><b>{state.clusters.length}</b></button>
+                {state.watchlists.map((watchlist) => {
+                  const count = state.clusters.filter((cluster) => cluster.matchedWatchlistIds.includes(watchlist.id)).length;
+                  return (
+                    <div key={watchlist.id} className={selectedWatchlist === watchlist.id ? 'watch-row active' : 'watch-row'}>
+                      <button className="watch-item" onClick={() => this.setSelectedWatchlist(watchlist.id)}>
+                        <span><i className={`dot ${watchlist.priority}${watchlist.enabled ? '' : ' off'}`} />{watchlist.name}</span>
+                        <b>{count}</b>
+                      </button>
+                      <div className="watch-row-actions">
+                        <button className="mini-action" title="Edit" onClick={() => this.editWatchlist(watchlist.id)}>✎</button>
+                        <button className="mini-action" title={watchlist.enabled ? 'Disable' : 'Enable'} onClick={() => this.toggleWatchlist(watchlist.id)}>{watchlist.enabled ? '◉' : '○'}</button>
+                        <button className="mini-action danger" title="Remove" onClick={() => this.removeWatchlist(watchlist.id)}>×</button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </aside>
+                  );
+                })}
+              </div>
+            </aside>
 
-          <section className="story-stream">
-            <div className="stream-tabs">{(['stream', 'briefing', 'insights', 'actions', 'settings'] as ActiveView[]).map((view) => <button key={view} className={state.ui.activeView === view ? 'active' : ''} onClick={() => this.setView(view)}>{view}</button>)}</div>
-            {state.clusters.length === 0 && state.ui.activeView !== 'settings' ? <EmptyState onSeed={() => this.runTool('seed', { action: 'seed_demo', profile: 'ai_tools' })} /> : null}
-            {state.ui.activeView === 'stream' && state.clusters.length > 0 ? <ClusterList clusters={filteredClusters} state={state} selectedId={state.ui.selectedClusterId} filter={this.state.streamFilter} setFilter={(streamFilter) => this.setState({ streamFilter })} onSelect={this.setSelectedCluster} onMarkAllSeen={this.markAllSeen} /> : null}
-            {state.ui.activeView === 'briefing' ? <BriefingPanel briefing={this.state.briefing} busy={this.state.busy === 'brief'} onBrief={(briefingType) => this.runTool('brief', { action: 'briefing', briefingType, limit: 8 })} onSaveInsight={() => this.state.briefing && this.runTool('save-insight', { action: 'save_insight', title: 'Saved briefing', body: this.state.briefing, tags: ['briefing'] })} onCreateAction={() => this.state.briefing && this.runTool('create-action', { action: 'create_action', title: 'Review Signal Desk briefing', description: this.state.briefing.slice(0, 500), priority: 'normal' })} /> : null}
-            {state.ui.activeView === 'insights' ? <InsightsPanel state={state} createInsight={this.createInsight} editInsight={this.editInsight} deleteInsight={this.deleteInsight} exportInsightToMemory={this.exportInsightToMemory} /> : null}
-            {state.ui.activeView === 'actions' ? <ActionsPanel state={state} updateActionStatus={this.updateActionStatus} editAction={this.editAction} sendActionToKanban={this.sendActionToKanban} createReminderFromAction={this.createReminderFromAction} /> : null}
-            {state.ui.activeView === 'settings' ? <SettingsPanel sourceDraft={this.state.sourceDraft} setSourceDraft={(sourceDraft) => this.setState({ sourceDraft })} addSource={this.addSource} addGoogleNewsSource={this.addGoogleNewsSource} addGithubReleaseSource={this.addGithubReleaseSource} addHackerNewsSource={this.addHackerNewsSource} toggleSource={this.toggleSource} editSource={this.editSource} removeSource={this.removeSource} refreshSource={this.refreshSource} refreshFailedSources={this.refreshFailedSources} refreshEnabledSources={() => this.runTool('refresh', { action: 'refresh' })} copyOpml={this.copyOpml} importOpml={this.importOpml} seedDemo={() => this.runTool('seed', { action: 'seed_demo', profile: 'ai_tools' })} state={state} latestRun={latestRun} failedCount={failedCount} showAdvanced={this.state.showAdvancedSources} setShowAdvanced={(showAdvancedSources) => this.setState({ showAdvancedSources })} /> : null}
-          </section>
+            <section className="story-stream">
+              <div className="stream-tabs">{(['stream', 'briefing', 'insights', 'actions', 'settings'] as ActiveView[]).map((view) => <button key={view} className={state.ui.activeView === view ? 'active' : ''} onClick={() => this.setView(view)}>{view}</button>)}</div>
+              {state.clusters.length === 0 && state.ui.activeView !== 'settings' ? <EmptyState onSeed={() => this.runTool('seed', { action: 'seed_demo', profile: 'ai_tools' })} /> : null}
+              {state.ui.activeView === 'stream' && state.clusters.length > 0 ? <ClusterList clusters={filteredClusters} state={state} selectedId={state.ui.selectedClusterId} filter={this.state.streamFilter} setFilter={(streamFilter) => this.setState({ streamFilter })} onSelect={this.setSelectedCluster} onMarkAllSeen={this.markAllSeen} /> : null}
+              {state.ui.activeView === 'briefing' ? <BriefingPanel briefing={this.state.briefing} busy={this.state.busy === 'brief'} onBrief={(briefingType) => this.runTool('brief', { action: 'briefing', briefingType, limit: 8 })} onSaveInsight={() => this.state.briefing && this.runTool('save-insight', { action: 'save_insight', title: 'Saved briefing', body: this.state.briefing, tags: ['briefing'] })} onCreateAction={() => this.state.briefing && this.runTool('create-action', { action: 'create_action', title: 'Review Signal Desk briefing', description: this.state.briefing.slice(0, 500), priority: 'normal' })} /> : null}
+              {state.ui.activeView === 'insights' ? <InsightsPanel state={state} createInsight={this.createInsight} editInsight={this.editInsight} deleteInsight={this.deleteInsight} exportInsightToMemory={this.exportInsightToMemory} /> : null}
+              {state.ui.activeView === 'actions' ? <ActionsPanel state={state} updateActionStatus={this.updateActionStatus} editAction={this.editAction} sendActionToKanban={this.sendActionToKanban} createReminderFromAction={this.createReminderFromAction} /> : null}
+              {state.ui.activeView === 'settings' ? <SettingsPanel sourceDraft={this.state.sourceDraft} setSourceDraft={(sourceDraft) => this.setState({ sourceDraft })} addSource={this.addSource} addGoogleNewsSource={this.addGoogleNewsSource} addGithubReleaseSource={this.addGithubReleaseSource} addHackerNewsSource={this.addHackerNewsSource} toggleSource={this.toggleSource} editSource={this.editSource} removeSource={this.removeSource} refreshSource={this.refreshSource} refreshFailedSources={this.refreshFailedSources} refreshEnabledSources={() => this.runTool('refresh', { action: 'refresh' })} copyOpml={this.copyOpml} importOpml={this.importOpml} seedDemo={() => this.runTool('seed', { action: 'seed_demo', profile: 'ai_tools' })} state={state} latestRun={latestRun} failedCount={failedCount} showAdvanced={this.state.showAdvancedSources} setShowAdvanced={(showAdvancedSources) => this.setState({ showAdvancedSources })} /> : null}
+            </section>
 
-          <aside className="briefing-desk">
-            <div className="panel-label">Briefing desk</div>
-            <div className="briefing-body">
-              {selectedCluster ? <SelectedStory cluster={selectedCluster} state={state} prompt={this.prompt} markArticle={this.markArticle} markCluster={this.markCluster} /> : <p className="muted">Select a story to brief, save, or turn into action.</p>}
-            </div>
-          </aside>
-        </main>
+            <aside className="briefing-desk">
+              <div className="panel-label">Briefing desk</div>
+              <div className="briefing-body">
+                {selectedCluster ? <SelectedStory cluster={selectedCluster} state={state} prompt={this.prompt} markArticle={this.markArticle} markCluster={this.markCluster} /> : <p className="muted">Select a story to brief, save, or turn into action.</p>}
+              </div>
+            </aside>
+          </main>
         )}
       </div>
     );
   }
-}
-
-const guideScreenshots = [
-  { src: streamScreenshot, title: 'Stream and briefing desk', caption: 'Triage clustered stories, filter noise, and use the briefing desk to summarise, save, or turn a story into an action.' },
-  { src: briefingScreenshot, title: 'Briefing presets', caption: 'Generate repeatable briefings such as Today’s Signal, Launch Watch, Competitor Radar, Security, and Repo Releases.' },
-  { src: insightsScreenshot, title: 'Saved insights', caption: 'Keep durable conclusions separate from raw articles, then export the ones that should become long-term Sero context.' },
-  { src: actionsScreenshot, title: 'Follow-up actions', caption: 'Convert stories and briefings into tasks, then hand them to Kanban or Reminders through the Sero agent.' },
-  { src: settingsScreenshot, title: 'Sources and imports', caption: 'Maintain RSS/Atom sources, use Google News/GitHub/Hacker News helpers, refresh failed feeds, and copy or import OPML.' },
-];
-
-function HelpGuide({ onBack }: { onBack: () => void }) {
-  return (
-    <main className="guide-page" aria-labelledby="signal-desk-guide-title">
-      <section className="guide-hero">
-        <div>
-          <p className="guide-kicker">End-user workflow</p>
-          <h2 id="signal-desk-guide-title">Using Signal Desk with Sero</h2>
-          <p>Signal Desk is an RSS-first intelligence desk. Add feeds and watchlists, refresh them into story clusters, then use Sero to turn the important signals into briefings, saved insights, actions, Kanban cards, reminders, or deeper research.</p>
-        </div>
-        <Button variant="secondary" onClick={onBack}>Back to desk</Button>
-      </section>
-
-      <section className="guide-quickstart" aria-label="Recommended daily workflow">
-        {['Refresh enabled sources', 'Triage the stream', 'Summarise high-signal stories', 'Save durable insights', 'Create follow-up actions', 'Send tasks to Kanban or Reminders'].map((step, index) => (
-          <article key={step}>
-            <span>{String(index + 1).padStart(2, '0')}</span>
-            <strong>{step}</strong>
-          </article>
-        ))}
-      </section>
-
-      <section className="guide-section guide-workflow">
-        <div className="guide-section-head">
-          <p className="guide-kicker">Core concepts</p>
-          <h3>The Signal Desk loop</h3>
-        </div>
-        <div className="guide-cards">
-          <article><h4>Sources</h4><p>RSS or Atom feeds from blogs, changelogs, security feeds, GitHub releases, Hacker News, Google News searches, or company sites.</p></article>
-          <article><h4>Watchlists</h4><p>Named radars with keywords and priority. Keep them specific: companies, repos, product categories, security issues, or people.</p></article>
-          <article><h4>Stories</h4><p>Signal Desk clusters related articles into stories, scores them, and sorts the stream by importance so you can work top-down.</p></article>
-          <article><h4>Briefings</h4><p>Briefings turn clusters into judgement: what changed, why it matters, evidence, and recommended next steps.</p></article>
-          <article><h4>Insights</h4><p>Insights are durable conclusions worth keeping. Save judgement, not raw article lists.</p></article>
-          <article><h4>Actions</h4><p>Actions are the operational follow-ups: review a release, compare a competitor, investigate an incident, or schedule a check-in.</p></article>
-        </div>
-      </section>
-
-      <section className="guide-section guide-screenshots">
-        <div className="guide-section-head">
-          <p className="guide-kicker">Application tour</p>
-          <h3>What each area is for</h3>
-        </div>
-        <div className="guide-shot-grid">
-          {guideScreenshots.map((shot) => (
-            <figure key={shot.title}>
-              <img src={shot.src} alt={`${shot.title} screenshot`} loading="lazy" />
-              <figcaption><strong>{shot.title}</strong><span>{shot.caption}</span></figcaption>
-            </figure>
-          ))}
-        </div>
-      </section>
-
-      <section className="guide-section guide-tools">
-        <div className="guide-section-head">
-          <p className="guide-kicker">Sero hand-offs</p>
-          <h3>Use Signal Desk with the rest of Sero</h3>
-        </div>
-        <div className="guide-tool-list">
-          <article><h4>Agent prompts</h4><p>Ask: “Give me today’s Signal Desk briefing”, “Summarise the top story in founder style”, or “Turn the top three stories into actions”.</p></article>
-          <article><h4>Memory</h4><p>Use <b>To memory</b> for durable insights: market direction, competitor positioning, repeated technical signals, or strategic implications.</p></article>
-          <article><h4>Kanban</h4><p>Use <b>→ Kanban</b> on actions when follow-up becomes real work. Briefing → action → Kanban is the recommended execution path.</p></article>
-          <article><h4>Reminders</h4><p>Create reminders for time-sensitive intelligence: release dates, security follow-ups, competitor launches, or “check again next week”.</p></article>
-          <article><h4>Browser and web tools</h4><p>Use Signal Desk for discovery, then ask Sero to fetch original articles, compare announcements, or open sources for deeper research.</p></article>
-          <article><h4>Repo workflows</h4><p>For GitHub release sources, ask Sero to check whether this workspace depends on affected packages or needs migration work.</p></article>
-        </div>
-      </section>
-
-      <section className="guide-section guide-reference">
-        <div>
-          <h3>Useful commands and prompts</h3>
-          <pre>{`sero signal_desk status\nsero signal_desk refresh\nsero signal_desk list_clusters --limit 10\nsero signal_desk briefing --briefingType today --limit 5`}</pre>
-        </div>
-        <div>
-          <h3>Best practices</h3>
-          <ul>
-            <li>Use high priority only for watchlists that genuinely matter.</li>
-            <li>Dismiss aggressively so the stream stays useful.</li>
-            <li>Save conclusions as insights; do not save raw article dumps.</li>
-            <li>Turn only high-signal stories into actions.</li>
-            <li>Use OPML export/import in Settings to move or bulk-load sources.</li>
-          </ul>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function ClusterList({ clusters, state, selectedId, filter, setFilter, onSelect, onMarkAllSeen }: { clusters: SignalDeskState['clusters']; state: SignalDeskState; selectedId?: string; filter: 'active' | 'saved' | 'dismissed' | 'all'; setFilter: (filter: 'active' | 'saved' | 'dismissed' | 'all') => void; onSelect: (id: string) => void; onMarkAllSeen: () => void }) {
-  return (
-    <div className="stream-body">
-      <div className="filter-row">
-        <div className="segmented">
-          {(['active', 'saved', 'dismissed', 'all'] as const).map((item) => (
-            <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>
-          ))}
-        </div>
-        <button className="text-link" onClick={onMarkAllSeen}>Mark all seen</button>
-      </div>
-      <div className="cluster-list">
-        {clusters.map((cluster) => {
-          const articles = cluster.articleIds.flatMap((id) => { const article = state.articles.find((item) => item.id === id); return article ? [article] : []; });
-          const isHigh = cluster.importance >= 75;
-          return (
-            <article key={cluster.id} className={selectedId === cluster.id ? 'cluster-card selected' : 'cluster-card'} onClick={() => onSelect(cluster.id)}>
-              <div className="cluster-meta">
-                <span className={`pill-signal${isHigh ? ' high' : ''}`}>{isHigh ? '◆ High signal' : '◇ Signal'}</span>
-                <span>{cluster.status}</span>
-                <span>{articles.length} source{articles.length === 1 ? '' : 's'}</span>
-              </div>
-              <h2>{cluster.headline}</h2>
-              <p>{articles[0]?.snippet ?? 'No summary yet — ask the agent to summarise this story.'}</p>
-              {cluster.tags.length ? <div className="chip-row">{cluster.tags.map((tag) => <span key={tag}>{tag}</span>)}</div> : null}
-            </article>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function SelectedStory({ cluster, state, prompt, markArticle, markCluster }: { cluster: SignalDeskState['clusters'][number]; state: SignalDeskState; prompt: (message: string) => void; markArticle: (id: string, status: 'new' | 'seen' | 'saved' | 'dismissed') => void; markCluster: (id: string, status: 'new' | 'seen' | 'saved' | 'dismissed') => void }) {
-  const articles = cluster.articleIds.flatMap((id) => { const article = state.articles.find((item) => item.id === id); return article ? [article] : []; });
-  const isHigh = cluster.importance >= 75;
-  return (
-    <div className="selected-story">
-      <div className="story-head">
-        <div className="story-score">
-          <span className={`story-score-num${isHigh ? ' high' : ''}`}>{cluster.importance}</span>
-          <span className="story-score-label">{isHigh ? 'High signal' : 'Signal'}</span>
-        </div>
-        <h3>{cluster.headline}</h3>
-        <p className="story-meta">{cluster.matchedWatchlistIds.length || 'No'} watchlist{cluster.matchedWatchlistIds.length === 1 ? '' : 's'} · {cluster.articleIds.length} article{cluster.articleIds.length === 1 ? '' : 's'} · {cluster.status}</p>
-      </div>
-
-      {cluster.summary ? (
-        <div className="saved-summary">
-          <strong>Saved summary</strong>
-          <p>{cluster.summary.text}</p>
-        </div>
-      ) : null}
-
-      <div className="primary-action">
-        <Button size="sm" onClick={() => prompt(`Summarise Signal Desk cluster ${cluster.id} in founder style. Explain what matters, why now, and suggested actions. Then save it back with signal_desk action save_summary.`)}>Summarise this story</Button>
-        <div className="secondary-actions">
-          <Button size="sm" variant="secondary" onClick={() => prompt(`Use Signal Desk to save a concise insight from cluster ${cluster.id}: ${cluster.headline}. Include why it matters and suggested follow-up.`)}>Save insight</Button>
-          <Button size="sm" variant="secondary" onClick={() => prompt(`Use Signal Desk to create one practical action from cluster ${cluster.id}: ${cluster.headline}.`)}>Create action</Button>
-        </div>
-      </div>
-
-      <div className="status-strip">
-        <span className="label">Cluster</span>
-        <button className={cluster.status === 'seen' ? 'icon-btn active' : 'icon-btn'} onClick={() => markCluster(cluster.id, 'seen')} title="Mark seen">Seen</button>
-        <button className={cluster.status === 'saved' ? 'icon-btn active' : 'icon-btn'} onClick={() => markCluster(cluster.id, 'saved')} title="Save">Save</button>
-        <button className={cluster.status === 'dismissed' ? 'icon-btn active' : 'icon-btn'} onClick={() => markCluster(cluster.id, 'dismissed')} title="Dismiss">Dismiss</button>
-        <button className="icon-btn" onClick={() => markCluster(cluster.id, 'new')} title="Undo">↺</button>
-      </div>
-
-      <div className="article-list">
-        {articles.map((article) => (
-          <div className="article-row" key={article.id}>
-            <a href={article.url} target="_blank" rel="noreferrer">{article.title}</a>
-            <p className="meta">{sourceName(state.sources.find((source) => source.id === article.sourceId))} · {formatDate(article.publishedAt)} · {article.status}</p>
-            {article.snippet ? <p>{article.snippet}</p> : null}
-            <div className="article-actions">
-              <button className="icon-btn" onClick={() => markArticle(article.id, 'seen')}>Seen</button>
-              <button className="icon-btn" onClick={() => markArticle(article.id, 'saved')}>Save</button>
-              <button className="icon-btn" onClick={() => markArticle(article.id, 'dismissed')}>Dismiss</button>
-              <button className="icon-btn" onClick={() => navigator.clipboard?.writeText(article.url)}>Copy URL</button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ onSeed }: { onSeed: () => void }) {
-  return (
-    <div className="empty-state">
-      <div className="radar-visual"><span /><span /><span /></div>
-      <h2>Your intelligence desk is empty</h2>
-      <p>Add RSS sources and watchlists, then let Sero turn the noise into briefings, insights, and actions.</p>
-      <Button onClick={onSeed}>Seed AI tools demo</Button>
-    </div>
-  );
-}
-
-function BriefingPanel({ briefing, busy, onBrief, onSaveInsight, onCreateAction }: { briefing: string; busy: boolean; onBrief: (type: string) => void; onSaveInsight: () => void; onCreateAction: () => void }) {
-  const presets: Array<[string, string]> = [['today', 'Today’s signal'], ['launch_watch', 'Launch watch'], ['company_radar', 'Competitor radar'], ['security_watch', 'Security'], ['repo_releases', 'Repo releases']];
-  return (
-    <div className="stream-body briefing-panel">
-      <div className="briefing-presets">
-        {presets.map(([type, label]) => <button key={type} onClick={() => onBrief(type)} disabled={busy}>{label}</button>)}
-      </div>
-      <pre className={briefing ? 'briefing-output' : 'briefing-output empty'}>{briefing || 'Generate a briefing to see what changed, why it matters, and what to do next.'}</pre>
-      <div className="briefing-footer">
-        <Button size="sm" variant="secondary" disabled={!briefing} onClick={onSaveInsight}>Save as insight</Button>
-        <Button size="sm" variant="secondary" disabled={!briefing} onClick={onCreateAction}>Create review action</Button>
-        <button className="icon-btn" disabled={!briefing} onClick={() => navigator.clipboard?.writeText(briefing)}>Copy</button>
-        <button className="icon-btn" disabled={!briefing} onClick={() => navigator.clipboard?.writeText(`# Signal Desk briefing\n\n${briefing}`)}>Copy MD</button>
-      </div>
-    </div>
-  );
-}
-
-function InsightsPanel({ state, createInsight, editInsight, deleteInsight, exportInsightToMemory }: { state: SignalDeskState; createInsight: () => void; editInsight: (id: string) => void; deleteInsight: (id: string) => void; exportInsightToMemory: (id: string) => void }) {
-  return (
-    <div className="stream-body">
-      <div className="filter-row">
-        <span className="rail-title">Saved insights · {state.insights.length}</span>
-        <Button size="sm" variant="secondary" onClick={createInsight}>New insight</Button>
-      </div>
-      <div className="simple-list">
-        {state.insights.length ? state.insights.map((insight) => (
-          <article key={insight.id}>
-            <h3>{insight.title}</h3>
-            <p>{insight.body}</p>
-            <p className="list-meta">{[...insight.articleIds, ...insight.clusterIds].length} evidence link(s)</p>
-            <div className="list-actions">
-              <button className="icon-btn" onClick={() => navigator.clipboard?.writeText(`${insight.title}\n\n${insight.body}`)}>Copy</button>
-              <button className="icon-btn" onClick={() => editInsight(insight.id)}>Edit</button>
-              <button className="icon-btn" onClick={() => exportInsightToMemory(insight.id)}>To memory</button>
-              <button className="icon-btn" onClick={() => deleteInsight(insight.id)}>Delete</button>
-            </div>
-          </article>
-        )) : <p className="muted">No saved insights yet.</p>}
-      </div>
-    </div>
-  );
-}
-
-function ActionsPanel({ state, updateActionStatus, editAction, sendActionToKanban, createReminderFromAction }: { state: SignalDeskState; updateActionStatus: (id: string, status: 'open' | 'done' | 'dismissed') => void; editAction: (id: string) => void; sendActionToKanban: (id: string) => void; createReminderFromAction: (id: string) => void }) {
-  return (
-    <div className="stream-body">
-      <div className="filter-row">
-        <span className="rail-title">Actions · {state.actions.length}</span>
-      </div>
-      <div className="simple-list">
-        {state.actions.length ? state.actions.map((action) => (
-          <article key={action.id}>
-            <h3>{action.title}</h3>
-            <p>{action.description ?? 'No description'}</p>
-            <p className="list-meta">{action.priority} · {action.status} · {[...action.articleIds, ...action.clusterIds, ...action.insightIds].length} link(s)</p>
-            <div className="list-actions">
-              <button className={action.status === 'open' ? 'icon-btn active' : 'icon-btn'} onClick={() => updateActionStatus(action.id, 'open')}>Open</button>
-              <button className={action.status === 'done' ? 'icon-btn active' : 'icon-btn'} onClick={() => updateActionStatus(action.id, 'done')}>Done</button>
-              <button className={action.status === 'dismissed' ? 'icon-btn active' : 'icon-btn'} onClick={() => updateActionStatus(action.id, 'dismissed')}>Dismiss</button>
-              <button className="icon-btn" onClick={() => editAction(action.id)}>Edit</button>
-              <button className="icon-btn" onClick={() => sendActionToKanban(action.id)}>→ Kanban</button>
-              <button className="icon-btn" onClick={() => createReminderFromAction(action.id)}>Reminder</button>
-            </div>
-          </article>
-        )) : <p className="muted">No actions yet.</p>}
-      </div>
-    </div>
-  );
-}
-
-function SettingsPanel({ sourceDraft, setSourceDraft, addSource, addGoogleNewsSource, addGithubReleaseSource, addHackerNewsSource, toggleSource, editSource, removeSource, refreshSource, refreshFailedSources, refreshEnabledSources, copyOpml, importOpml, seedDemo, state, latestRun, failedCount, showAdvanced, setShowAdvanced }: { sourceDraft: { name: string; url: string }; setSourceDraft: (value: { name: string; url: string }) => void; addSource: () => void; addGoogleNewsSource: () => void; addGithubReleaseSource: () => void; addHackerNewsSource: () => void; toggleSource: (id: string) => void; editSource: (id: string) => void; removeSource: (id: string) => void; refreshSource: (id: string) => void; refreshFailedSources: () => void; refreshEnabledSources: () => void; copyOpml: () => void; importOpml: () => void; seedDemo: () => void; state: SignalDeskState; latestRun: SignalDeskState['runs'][number] | undefined; failedCount: number; showAdvanced: boolean; setShowAdvanced: (value: boolean) => void }) {
-  return (
-    <div className="stream-body settings-panel">
-      <section className="settings-section">
-        <div className="section-head">
-          <div>
-            <h2>Add source</h2>
-            <p className="section-sub">RSS / Atom URL · or pick a template below</p>
-          </div>
-        </div>
-        <div className="source-form">
-          <input value={sourceDraft.name} onChange={(event) => setSourceDraft({ ...sourceDraft, name: event.target.value })} placeholder="Name or owner/repo" />
-          <input value={sourceDraft.url} onChange={(event) => setSourceDraft({ ...sourceDraft, url: event.target.value })} placeholder="https://example.com/feed.xml" />
-          <Button size="sm" onClick={addSource}>Add</Button>
-        </div>
-        <div className="template-row">
-          <span className="label">Templates</span>
-          <button onClick={addGoogleNewsSource}>Google News topic</button>
-          <button onClick={addGithubReleaseSource}>GitHub releases</button>
-          <button onClick={addHackerNewsSource}>HN newest</button>
-        </div>
-      </section>
-
-      <section className="settings-section">
-        <div className="section-head">
-          <div>
-            <h2>Sources · {state.sources.length}</h2>
-            <p className="section-sub">{failedCount > 0 ? `${failedCount} failing · hover a row for actions` : 'Hover a row for actions'}</p>
-          </div>
-          {state.sources.length === 0 ? (
-            <Button size="sm" variant="secondary" onClick={seedDemo}>Seed demo</Button>
-          ) : null}
-        </div>
-
-        {latestRun ? (
-          <div className={`run-status ${latestRun.status}`}>
-            <strong>{latestRun.status} · {latestRun.sourcesFetched ?? 0}/{latestRun.sourceIds.length} fetched</strong>
-            <span>{latestRun.articlesAdded} articles · {latestRun.clustersAdded} clusters · {latestRun.finishedAt ? formatDate(latestRun.finishedAt) : 'in progress'}</span>
-            {latestRun.errors?.length ? <p>{latestRun.errors.join(' · ')}</p> : null}
-          </div>
-        ) : null}
-
-        {state.sources.length > 0 ? (
-          <div className="source-table">
-            {state.sources.map((source) => (
-              <div className="source-row" key={source.id}>
-                <div>
-                  <div className="source-name">{source.name}</div>
-                  <div className={source.lastError ? 'source-meta error' : 'source-meta'}>
-                    {source.kind} · {source.lastFetchedAt ? formatDate(source.lastFetchedAt) : 'never fetched'}
-                    {source.lastError ? ` · ${source.lastError}` : ''}
-                  </div>
-                </div>
-                <div className="source-status">
-                  <i className={`dot ${source.enabled ? 'normal' : 'off'}`} />
-                </div>
-                <div className="source-actions">
-                  <button className="icon-btn" onClick={() => refreshSource(source.id)} title="Refresh">↻</button>
-                  <button className="icon-btn" onClick={() => editSource(source.id)} title="Edit">✎</button>
-                  <button className="icon-btn" onClick={() => toggleSource(source.id)} title={source.enabled ? 'Disable' : 'Enable'}>{source.enabled ? '◉' : '○'}</button>
-                  <button className="icon-btn" onClick={() => removeSource(source.id)} title="Remove">×</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </section>
-
-      <section className="settings-section">
-        <button className={showAdvanced ? 'advanced-toggle open' : 'advanced-toggle'} onClick={() => setShowAdvanced(!showAdvanced)}>
-          <span className="chev">›</span> Advanced
-        </button>
-        {showAdvanced ? (
-          <div className="advanced-body">
-            <div className="advanced-row">
-              <Button size="sm" variant="secondary" onClick={refreshEnabledSources}>Refresh all enabled</Button>
-              <Button size="sm" variant="secondary" onClick={refreshFailedSources} disabled={failedCount === 0}>Refresh failed{failedCount ? ` (${failedCount})` : ''}</Button>
-            </div>
-            <div className="advanced-row">
-              <Button size="sm" variant="ghost" onClick={copyOpml}>Copy OPML</Button>
-              <Button size="sm" variant="ghost" onClick={importOpml}>Import OPML</Button>
-              <Button size="sm" variant="ghost" onClick={seedDemo}>Seed demo</Button>
-            </div>
-          </div>
-        ) : null}
-      </section>
-    </div>
-  );
 }
 
 export default SignalDeskApp;

@@ -1,0 +1,51 @@
+/* ──────────────────────────────────────────────────────────────
+   Signal Desk · editorial intelligence interface
+   Single accent (cyan), monospaced data, hover-revealed actions
+   ────────────────────────────────────────────────────────────── */
+
+:root {
+  --bg-0: #0a0c10;
+  --bg-1: #0e1116;
+  --bg-2: #141821;
+  --bg-3: #1a1f2a;
+  --line: rgba(148, 163, 184, 0.10);
+  --line-strong: rgba(148, 163, 184, 0.18);
+  --ink-0: #f1f5f9;
+  --ink-1: #cbd5e1;
+  --ink-2: #94a3b8;
+  --ink-3: #64748b;
+  --accent: #7dd3fc;
+  --accent-soft: rgba(125, 211, 252, 0.12);
+  --accent-line: rgba(125, 211, 252, 0.28);
+  --warn: #fbbf24;
+  --danger: #fb7185;
+  --ok: #4ade80;
+  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 24px 48px -24px rgba(0, 0, 0, 0.6);
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
+  --sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+.signal-desk-shell {
+  height: 100dvh;
+  max-height: 100dvh;
+  background:
+    radial-gradient(900px 500px at 85% -10%, rgba(125, 211, 252, 0.06), transparent 60%),
+    var(--bg-0);
+  color: var(--ink-0);
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--sans);
+  font-feature-settings: "ss01", "cv11", "tnum";
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.005em;
+  padding: 20px 20px 16px;
+  overflow: hidden;
+}
