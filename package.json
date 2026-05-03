@@ -1,0 +1,89 @@
+{
+  "name": "@sero-ai/plugin-signal-desk",
+  "version": "0.1.0",
+  "description": "RSS-first personal intelligence desk for Sero",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "extension",
+    "runtime",
+    "shared",
+    "prompts",
+    "skills",
+    "ui",
+    "assets",
+    "README.md",
+    "LICENSE",
+    "package.json",
+    "vite.config.ts"
+  ],
+  "keywords": ["pi-package"],
+  "scripts": {
+    "dev": "ESBUILD_BINARY_PATH= vite",
+    "build": "ESBUILD_BINARY_PATH= vite build",
+    "test": "vitest run --root .",
+    "test:watch": "vitest --root .",
+    "typecheck": "tsc --noEmit -p ui/tsconfig.json && tsc --noEmit -p extension/tsconfig.json && tsc --noEmit -p runtime/tsconfig.json",
+    "prepack": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "pi": {
+    "extensions": ["./extension/index.ts"],
+    "prompts": [
+      "./prompts/signal-briefing.md",
+      "./prompts/launch-watch.md",
+      "./prompts/competitor-radar.md"
+    ],
+    "skills": ["./skills"]
+  },
+  "sero": {
+    "app": {
+      "id": "signal-desk",
+      "name": "Signal Desk",
+      "icon": "radar",
+      "stateFile": ".sero/apps/signal-desk/state.json",
+      "ui": "./dist/ui/remoteEntry.js",
+      "component": "SignalDeskApp",
+      "devPort": 5178,
+      "runtime": "./runtime/index.ts"
+    },
+    "plugin": {
+      "category": "productivity",
+      "tags": ["rss", "intelligence", "briefings", "news", "research"],
+      "minSeroVersion": "0.1.0",
+      "bridgeTools": ["signal_desk"],
+      "requiredHostCapabilities": [
+        "appAgent.invokeTool",
+        "tool.cli",
+        "appRuntime.background"
+      ]
+    }
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.48",
+    "fast-xml-parser": "^5.3.2"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": ">=0.61.1",
+    "@mariozechner/pi-coding-agent": ">=0.61.1",
+    "@mariozechner/pi-tui": ">=0.61.1",
+    "zod": ">=4.0.0"
+  },
+  "devDependencies": {
+    "@module-federation/vite": "^1.11.0",
+    "@sero-ai/app-runtime": "^0.1.2",
+    "@sero-ai/common": "^0.1.0",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/node": "^22.19.11",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "jsdom": "^27.0.0",
+    "motion": "^12.34.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.1",
+    "vitest": "^4.0.18"
+  }
+}
