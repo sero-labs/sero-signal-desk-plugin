@@ -40,8 +40,12 @@ const ACTIONS = [
   'merge_clusters',
   'split_cluster',
   'briefing',
+  'save_briefing',
   'save_insight',
+  'update_insight',
+  'delete_insight',
   'create_action',
+  'update_action',
   'mark',
   'seed_demo',
 ] as const;
@@ -183,7 +187,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: 'signal_desk',
     label: 'Signal Desk',
-    description: 'Manage Signal Desk RSS intelligence. Actions include status, add_source, add_watchlist, refresh, list_articles, list_clusters, briefing, save_insight, create_action, mark, seed_demo.',
+    description: 'Manage Signal Desk RSS intelligence. Actions include status, add_source, update_source, remove_source, add_watchlist, update_watchlist, remove_watchlist, refresh, list_articles, list_clusters, briefing, save_briefing, save_insight, update_insight, delete_insight, create_action, update_action, mark, seed_demo.',
     parameters: Params,
     async execute(_toolCallId, params: ParamsValue, _signal, _onUpdate, ctx) {
       const resolvedPath = ctx ? resolveStatePath(ctx.cwd) : statePath;
@@ -316,20 +320,56 @@ export default function (pi: ExtensionAPI) {
         await writeSignalDeskState(statePath, state); return textResult(`Split ${cluster.id} into ${articles.length} article-level clusters.`, { clusters: state.clusters });
       }
       if (params.action === 'briefing') return textResult(buildBriefing(state, params), { clusters: state.clusters.slice(0, params.limit ?? 8) });
+      if (params.action === 'save_briefing') {
+        if (!params.body) return textResult('Error: body is required.');
+        const type = String(params.briefingType ?? 'today');
+        const briefing = { id: createId(state, 'brief'), type, title: params.title ?? `Briefing: ${type}`, body: params.body, createdAt: now() };
+        state.briefings = [briefing, ...state.briefings].slice(0, 25);
+        await writeSignalDeskState(statePath, state); return textResult(`Saved briefing: ${briefing.title}`, { briefing });
+      }
       if (params.action === 'save_insight') {
         if (!params.title || !params.body) return textResult('Error: title and body are required.');
         const insight = { id: createId(state, 'ins'), title: params.title, body: params.body, articleIds: params.articleIds ?? [], clusterIds: params.clusterIds ?? [], tags: params.tags ?? [], createdAt: now(), updatedAt: now() };
         state.insights.unshift(insight); await writeSignalDeskState(statePath, state); return textResult(`Saved insight: ${insight.title}`, { insight });
+      }
+      if (params.action === 'update_insight') {
+        if (!params.id) return textResult('Error: id is required.');
+        const insight = state.insights.find((item) => item.id === params.id);
+        if (!insight) return textResult('Error: insight not found.');
+        if (params.title) insight.title = params.title;
+        if (params.body) insight.body = params.body;
+        if (params.tags) insight.tags = params.tags;
+        insight.updatedAt = now();
+        await writeSignalDeskState(statePath, state); return textResult(`Updated insight: ${insight.title}`, { insight });
+      }
+      if (params.action === 'delete_insight') {
+        if (!params.id) return textResult('Error: id is required.');
+        state.insights = state.insights.filter((insight) => insight.id !== params.id);
+        await writeSignalDeskState(statePath, state); return textResult(`Deleted insight ${params.id}.`);
       }
       if (params.action === 'create_action') {
         if (!params.title) return textResult('Error: title is required.');
         const action: SignalAction = { id: createId(state, 'act'), title: params.title, description: params.description, articleIds: params.articleIds ?? [], clusterIds: params.clusterIds ?? [], insightIds: params.insightIds ?? [], priority: (params.priority as Priority) ?? 'normal', status: 'open', createdAt: now(), updatedAt: now() };
         state.actions.unshift(action); await writeSignalDeskState(statePath, state); return textResult(`Created action: ${action.title}`, { action });
       }
+      if (params.action === 'update_action') {
+        if (!params.id) return textResult('Error: id is required.');
+        const action = state.actions.find((item) => item.id === params.id);
+        if (!action) return textResult('Error: action not found.');
+        if (params.title) action.title = params.title;
+        if (params.description !== undefined) action.description = params.description;
+        if (params.priority) action.priority = params.priority as Priority;
+        if (params.status) action.status = params.status as SignalAction['status'];
+        action.updatedAt = now();
+        await writeSignalDeskState(statePath, state); return textResult(`Updated action: ${action.title}`, { action });
+      }
       if (params.action === 'mark') {
         const status = (params.status ?? 'seen') as ItemStatus;
-        state.articles = state.articles.map((a) => params.articleIds?.includes(a.id) ? { ...a, status } : a);
-        state.clusters = state.clusters.map((c) => params.clusterIds?.includes(c.id) ? { ...c, status } : c);
+        const selectedClusterIds = new Set(params.clusterIds ?? []);
+        const articleIdsFromClusters = state.clusters.filter((cluster) => selectedClusterIds.has(cluster.id)).flatMap((cluster) => cluster.articleIds);
+        const selectedArticleIds = new Set([...(params.articleIds ?? []), ...articleIdsFromClusters]);
+        state.articles = state.articles.map((article) => selectedArticleIds.has(article.id) ? { ...article, status } : article);
+        state.clusters = state.clusters.map((cluster) => selectedClusterIds.has(cluster.id) ? { ...cluster, status } : cluster);
         await writeSignalDeskState(statePath, state); return textResult(`Marked selected items as ${status}.`);
       }
       return textResult(`Unknown action: ${params.action}`);

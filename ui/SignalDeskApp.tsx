@@ -3,7 +3,7 @@ import { highSignalNotifications } from '../shared/advanced-intelligence';
 import { exportOpml } from '../shared/opml';
 import { createGithubReleasesSource, createGoogleNewsSource, createHackerNewsNewestSource, inferSourceKind } from '../shared/source-helpers';
 import type { ActiveView, SignalDeskState, Watchlist } from '../shared/types';
-import { createId, DEFAULT_STATE, normaliseState } from '../shared/types';
+import { DEFAULT_STATE, normaliseState } from '../shared/types';
 import { ActionsPanel } from './components/ActionsPanel';
 import { BriefingPanel, EmptyState } from './components/BriefingPanel';
 import { Button } from './components/Button';
@@ -44,10 +44,6 @@ const appContext = globalThis.__sero_app_context__;
 function getSero(): SeroGlobal {
   if (!window.sero) throw new Error('[Signal Desk] window.sero not available — must run inside Sero');
   return window.sero;
-}
-
-function currentTime(): string {
-  return new Date().toISOString();
 }
 
 type SignalDeskComponentState = {
@@ -138,10 +134,12 @@ export class SignalDeskApp extends Component<Record<string, never>, SignalDeskCo
       const text = result?.content?.[0]?.type === 'text' ? result.content[0].text ?? '' : '';
       if (args.action === 'briefing') {
         this.setState({ briefing: text });
-        this.updateAppState((prev) => ({
-          ...prev,
-          briefings: [{ id: createId(prev, 'brief'), type: String(args.briefingType ?? 'today'), title: `Briefing: ${String(args.briefingType ?? 'today')}`, body: text, createdAt: currentTime() }, ...prev.briefings].slice(0, 25),
-        }));
+        await invokeTool(ctx.appId, ctx.workspaceId, 'signal_desk', {
+          action: 'save_briefing',
+          briefingType: args.briefingType ?? 'today',
+          title: `Briefing: ${String(args.briefingType ?? 'today')}`,
+          body: text,
+        });
       }
     } finally {
       this.setState({ busy: null });
@@ -161,99 +159,98 @@ export class SignalDeskApp extends Component<Record<string, never>, SignalDeskCo
     this.setState({ sourceDraft: { name: '', url: '' } });
   };
 
-  private addSourceRecord = (name: string, url: string, category?: string): void => {
-    this.updateAppState((previous) => {
-      const next = normaliseState(previous);
-      if (next.sources.some((source) => source.url === url)) return next;
-      const stamp = currentTime();
-      next.sources = [...next.sources, { id: createId(next, 'src'), name, url, kind: inferSourceKind(url), category, enabled: true, createdAt: stamp, updatedAt: stamp }];
-      return { ...next };
-    });
+  private addSourceRecord = (name: string, url: string, category?: string, kind?: string): void => {
+    void this.runTool('add-source', { action: 'add_source', name, url, category, kind });
   };
 
   private addGoogleNewsSource = (): void => {
     const source = createGoogleNewsSource(this.state.sourceDraft.name.trim() || this.state.sourceDraft.url.trim());
-    this.addSourceRecord(source.name, source.url, source.category);
+    this.addSourceRecord(source.name, source.url, source.category, source.kind);
     this.setState({ sourceDraft: { name: '', url: '' } });
   };
 
   private addGithubReleaseSource = (): void => {
     const source = createGithubReleasesSource(this.state.sourceDraft.name.trim() || this.state.sourceDraft.url.trim());
     if (!source) return;
-    this.addSourceRecord(source.name, source.url, source.category);
+    this.addSourceRecord(source.name, source.url, source.category, source.kind);
     this.setState({ sourceDraft: { name: '', url: '' } });
   };
 
   private addHackerNewsSource = (): void => {
     const source = createHackerNewsNewestSource();
-    this.addSourceRecord(source.name, source.url, source.category);
+    this.addSourceRecord(source.name, source.url, source.category, source.kind);
   };
 
   private addWatchlist = (): void => {
     const name = this.state.watchDraft.name.trim();
     const keywords = this.state.watchDraft.keywords.split(',').map((item) => item.trim()).filter(Boolean);
     if (!name || !keywords.length) return;
-    this.updateAppState((previous) => {
-      const next = normaliseState(previous);
-      const stamp = currentTime();
-      const watchlist: Watchlist = { id: createId(next, 'watch'), name, type: 'topic', keywords, sourceIds: [], priority: 'normal', enabled: true, createdAt: stamp, updatedAt: stamp };
-      next.watchlists = [...next.watchlists, watchlist];
-      return { ...next };
-    });
+    void this.runTool('add-watchlist', { action: 'add_watchlist', name, keywords });
     this.setState({ watchDraft: { name: '', keywords: '' } });
   };
 
-  private toggleWatchlist = (id: string): void => this.updateAppState((prev) => ({ ...prev, watchlists: prev.watchlists.map((item) => item.id === id ? { ...item, enabled: !item.enabled, updatedAt: currentTime() } : item) }));
-  private removeWatchlist = (id: string): void => this.updateAppState((prev) => ({ ...prev, watchlists: prev.watchlists.filter((item) => item.id !== id), articles: prev.articles.map((article) => ({ ...article, matchedWatchlistIds: article.matchedWatchlistIds.filter((watchId) => watchId !== id) })), ui: { ...prev.ui, selectedWatchlistId: prev.ui.selectedWatchlistId === id ? undefined : prev.ui.selectedWatchlistId } }));
-  private editWatchlist = (id: string): void => this.updateAppState((prev) => {
-    const watchlist = prev.watchlists.find((item) => item.id === id);
-    if (!watchlist) return prev;
+  private toggleWatchlist = (id: string): void => {
+    const watchlist = normaliseState(this.state.rawState).watchlists.find((item) => item.id === id);
+    if (watchlist) void this.runTool('toggle-watchlist', { action: 'update_watchlist', id, enabled: !watchlist.enabled });
+  };
+  private removeWatchlist = (id: string): void => { void this.runTool('remove-watchlist', { action: 'remove_watchlist', id }); };
+  private editWatchlist = (id: string): void => {
+    const watchlist = normaliseState(this.state.rawState).watchlists.find((item) => item.id === id);
+    if (!watchlist) return;
     const name = window.prompt('Watchlist name', watchlist.name)?.trim() || watchlist.name;
     const keywordsRaw = window.prompt('Keywords, comma separated', watchlist.keywords.join(', ')) ?? watchlist.keywords.join(', ');
     const type = (window.prompt('Type: topic, company, repo, person, keyword', watchlist.type) || watchlist.type) as Watchlist['type'];
     const priority = (window.prompt('Priority: low, normal, high', watchlist.priority) || watchlist.priority) as Watchlist['priority'];
-    return { ...prev, watchlists: prev.watchlists.map((item) => item.id === id ? { ...item, name, type, priority, keywords: keywordsRaw.split(',').map((keyword) => keyword.trim()).filter(Boolean), updatedAt: currentTime() } : item) };
-  });
-  private toggleSource = (id: string): void => this.updateAppState((prev) => ({ ...prev, sources: prev.sources.map((item) => item.id === id ? { ...item, enabled: !item.enabled, updatedAt: currentTime() } : item) }));
-  private removeSource = (id: string): void => this.updateAppState((prev) => ({ ...prev, sources: prev.sources.filter((item) => item.id !== id), articles: prev.articles.filter((article) => article.sourceId !== id), clusters: prev.clusters.filter((cluster) => cluster.articleIds.some((articleId) => prev.articles.some((article) => article.id === articleId && article.sourceId !== id))) }));
-  private editSource = (id: string): void => this.updateAppState((prev) => {
-    const source = prev.sources.find((item) => item.id === id);
-    if (!source) return prev;
+    void this.runTool('update-watchlist', { action: 'update_watchlist', id, name, type, priority, keywords: keywordsRaw.split(',').map((keyword) => keyword.trim()).filter(Boolean) });
+  };
+  private toggleSource = (id: string): void => {
+    const source = normaliseState(this.state.rawState).sources.find((item) => item.id === id);
+    if (source) void this.runTool('toggle-source', { action: 'update_source', id, enabled: !source.enabled });
+  };
+  private removeSource = (id: string): void => { void this.runTool('remove-source', { action: 'remove_source', id }); };
+  private editSource = (id: string): void => {
+    const source = normaliseState(this.state.rawState).sources.find((item) => item.id === id);
+    if (!source) return;
     const name = window.prompt('Source name', source.name)?.trim() || source.name;
     const url = window.prompt('Source URL', source.url)?.trim() || source.url;
     const category = window.prompt('Source category', source.category ?? '')?.trim() || source.category;
-    return { ...prev, sources: prev.sources.map((item) => item.id === id ? { ...item, name, url, category, kind: inferSourceKind(url), updatedAt: currentTime() } : item) };
-  });
-  private markArticle = (id: string, status: 'new' | 'seen' | 'saved' | 'dismissed'): void => this.updateAppState((prev) => ({ ...prev, articles: prev.articles.map((article) => article.id === id ? { ...article, status } : article) }));
-  private markCluster = (id: string, status: 'new' | 'seen' | 'saved' | 'dismissed'): void => this.updateAppState((prev) => {
-    const cluster = prev.clusters.find((item) => item.id === id);
-    if (!cluster) return prev;
-    return { ...prev, clusters: prev.clusters.map((item) => item.id === id ? { ...item, status } : item), articles: prev.articles.map((article) => cluster.articleIds.includes(article.id) ? { ...article, status } : article) };
-  });
-  private markAllSeen = (): void => this.updateAppState((prev) => ({ ...prev, clusters: prev.clusters.map((cluster) => cluster.status === 'dismissed' ? cluster : { ...cluster, status: 'seen' }), articles: prev.articles.map((article) => article.status === 'dismissed' ? article : { ...article, status: 'seen' }) }));
-  private updateActionStatus = (id: string, status: 'open' | 'done' | 'dismissed'): void => this.updateAppState((prev) => ({ ...prev, actions: prev.actions.map((action) => action.id === id ? { ...action, status, updatedAt: currentTime() } : action) }));
-  private editAction = (id: string): void => this.updateAppState((prev) => {
-    const action = prev.actions.find((item) => item.id === id);
-    if (!action) return prev;
+    void this.runTool('update-source', { action: 'update_source', id, name, url, category, kind: inferSourceKind(url) });
+  };
+  private markArticle = (id: string, status: 'new' | 'seen' | 'saved' | 'dismissed'): void => { void this.runTool('mark-article', { action: 'mark', articleIds: [id], status }); };
+  private markCluster = (id: string, status: 'new' | 'seen' | 'saved' | 'dismissed'): void => { void this.runTool('mark-cluster', { action: 'mark', clusterIds: [id], status }); };
+  private markAllSeen = (): void => {
+    const state = normaliseState(this.state.rawState);
+    void this.runTool('mark-all-seen', {
+      action: 'mark',
+      articleIds: state.articles.filter((article) => article.status !== 'dismissed').map((article) => article.id),
+      clusterIds: state.clusters.filter((cluster) => cluster.status !== 'dismissed').map((cluster) => cluster.id),
+      status: 'seen',
+    });
+  };
+  private updateActionStatus = (id: string, status: 'open' | 'done' | 'dismissed'): void => { void this.runTool('update-action', { action: 'update_action', id, status }); };
+  private editAction = (id: string): void => {
+    const action = normaliseState(this.state.rawState).actions.find((item) => item.id === id);
+    if (!action) return;
     const title = window.prompt('Action title', action.title)?.trim() || action.title;
     const description = window.prompt('Action description', action.description ?? '') ?? action.description;
     const priority = (window.prompt('Priority: low, normal, high', action.priority) || action.priority) as 'low' | 'normal' | 'high';
-    return { ...prev, actions: prev.actions.map((item) => item.id === id ? { ...item, title, description, priority, updatedAt: currentTime() } : item) };
-  });
-  private createInsight = (): void => this.updateAppState((prev) => {
+    void this.runTool('update-action', { action: 'update_action', id, title, description, priority });
+  };
+  private createInsight = (): void => {
+    const state = normaliseState(this.state.rawState);
     const title = window.prompt('Insight title')?.trim();
     const body = window.prompt('Insight body')?.trim();
-    if (!title || !body) return prev;
-    return { ...prev, insights: [{ id: createId(prev, 'ins'), title, body, articleIds: [], clusterIds: prev.ui.selectedClusterId ? [prev.ui.selectedClusterId] : [], tags: [], createdAt: currentTime(), updatedAt: currentTime() }, ...prev.insights] };
-  });
-  private editInsight = (id: string): void => this.updateAppState((prev) => {
-    const insight = prev.insights.find((item) => item.id === id);
-    if (!insight) return prev;
+    if (!title || !body) return;
+    void this.runTool('save-insight', { action: 'save_insight', title, body, clusterIds: state.ui.selectedClusterId ? [state.ui.selectedClusterId] : [] });
+  };
+  private editInsight = (id: string): void => {
+    const insight = normaliseState(this.state.rawState).insights.find((item) => item.id === id);
+    if (!insight) return;
     const title = window.prompt('Insight title', insight.title)?.trim() || insight.title;
     const body = window.prompt('Insight body', insight.body)?.trim() || insight.body;
-    return { ...prev, insights: prev.insights.map((item) => item.id === id ? { ...item, title, body, updatedAt: currentTime() } : item) };
-  });
-  private deleteInsight = (id: string): void => this.updateAppState((prev) => ({ ...prev, insights: prev.insights.filter((insight) => insight.id !== id) }));
+    void this.runTool('update-insight', { action: 'update_insight', id, title, body });
+  };
+  private deleteInsight = (id: string): void => { void this.runTool('delete-insight', { action: 'delete_insight', id }); };
   private refreshSource = (id: string): void => { void this.runTool('refresh', { action: 'refresh', sourceIds: [id] }); };
   private refreshFailedSources = (): void => { const ids = normaliseState(this.state.rawState).sources.filter((source) => source.lastError).map((source) => source.id); if (ids.length) void this.runTool('refresh', { action: 'refresh', sourceIds: ids }); };
   private copyOpml = (): void => { void navigator.clipboard?.writeText(exportOpml(normaliseState(this.state.rawState).sources)); };
