@@ -17,7 +17,9 @@
     "package.json",
     "vite.config.ts"
   ],
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "scripts": {
     "dev": "ESBUILD_BINARY_PATH= vite",
     "build": "ESBUILD_BINARY_PATH= vite build",
@@ -27,13 +29,17 @@
     "prepack": "pnpm typecheck && pnpm test && pnpm build"
   },
   "pi": {
-    "extensions": ["./extension/index.ts"],
+    "extensions": [
+      "./extension/index.ts"
+    ],
     "prompts": [
       "./prompts/signal-briefing.md",
       "./prompts/launch-watch.md",
       "./prompts/competitor-radar.md"
     ],
-    "skills": ["./skills"]
+    "skills": [
+      "./skills"
+    ]
   },
   "sero": {
     "app": {
@@ -48,9 +54,17 @@
     },
     "plugin": {
       "category": "productivity",
-      "tags": ["rss", "intelligence", "briefings", "news", "research"],
+      "tags": [
+        "rss",
+        "intelligence",
+        "briefings",
+        "news",
+        "research"
+      ],
       "minSeroVersion": "0.1.0",
-      "bridgeTools": ["signal_desk"],
+      "bridgeTools": [
+        "signal_desk"
+      ],
       "requiredHostCapabilities": [
         "appAgent.invokeTool",
         "tool.cli",
@@ -59,19 +73,19 @@
     }
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.48",
-    "fast-xml-parser": "^5.3.2"
+    "fast-xml-parser": "^5.3.2",
+    "typebox": "^1.1.37"
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": ">=0.61.1",
-    "@mariozechner/pi-coding-agent": ">=0.61.1",
-    "@mariozechner/pi-tui": ">=0.61.1",
+    "@mariozechner/pi-ai": ">=0.72.1",
+    "@mariozechner/pi-coding-agent": ">=0.72.1",
+    "@mariozechner/pi-tui": ">=0.72.1",
     "zod": ">=4.0.0"
   },
   "devDependencies": {
     "@module-federation/vite": "^1.11.0",
     "@sero-ai/app-runtime": "^0.1.2",
-    "@sero-ai/common": "^0.1.0",
+    "@sero-ai/common": "^0.3.0",
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^22.19.11",
     "@types/react": "^19.2.13",

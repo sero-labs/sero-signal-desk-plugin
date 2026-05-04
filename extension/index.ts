@@ -1,7 +1,8 @@
 import path from 'node:path';
-import { StringEnum, Type, type Static } from '@mariozechner/pi-ai';
+import { StringEnum } from '@mariozechner/pi-ai';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { Text } from '@mariozechner/pi-tui';
+import { Type, type Static } from 'typebox';
 
 import { parseArticlesFromFeed } from '../shared/feed-parser';
 import { reclusterArticles } from '../shared/intelligence';
