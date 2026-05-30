@@ -77,15 +77,15 @@
     "typebox": "^1.1.37"
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": ">=0.72.1",
-    "@mariozechner/pi-coding-agent": ">=0.72.1",
-    "@mariozechner/pi-tui": ">=0.72.1",
+    "@earendil-works/pi-ai": ">=0.78.0",
+    "@earendil-works/pi-coding-agent": ">=0.78.0",
+    "@earendil-works/pi-tui": ">=0.78.0",
     "zod": ">=4.0.0"
   },
   "devDependencies": {
     "@module-federation/vite": "^1.11.0",
     "@sero-ai/app-runtime": "^0.1.2",
-    "@sero-ai/common": "^0.3.0",
+    "@sero-ai/common": "file:../../sero/packages/common",
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^22.19.11",
     "@types/react": "^19.2.13",
