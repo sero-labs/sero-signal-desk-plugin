@@ -1,6 +1,6 @@
 {
   "name": "@sero-ai/plugin-signal-desk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "RSS-first personal intelligence desk for Sero",
   "license": "MIT",
   "files": [
@@ -77,9 +77,10 @@
     "typebox": "^1.1.37"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.78.0",
-    "@earendil-works/pi-coding-agent": ">=0.78.0",
-    "@earendil-works/pi-tui": ">=0.78.0",
+    "@earendil-works/pi-agent-core": ">=0.80.6",
+    "@earendil-works/pi-ai": ">=0.80.6",
+    "@earendil-works/pi-coding-agent": ">=0.80.6",
+    "@earendil-works/pi-tui": ">=0.80.6",
     "zod": ">=4.0.0"
   },
   "devDependencies": {
