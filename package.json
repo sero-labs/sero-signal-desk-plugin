@@ -44,6 +44,7 @@
   "sero": {
     "app": {
       "id": "signal-desk",
+      "styleIsolation": "scope",
       "name": "Signal Desk",
       "icon": "radar",
       "stateFile": ".sero/apps/signal-desk/state.json",
@@ -84,6 +85,7 @@
     "zod": ">=4.0.0"
   },
   "devDependencies": {
+    "@sero-ai/plugin-vite": "^0.1.0",
     "@module-federation/vite": "^1.11.0",
     "@sero-ai/app-runtime": "^0.1.3",
     "@sero-ai/common": "^0.3.1",
