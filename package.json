@@ -2,6 +2,7 @@
   "name": "@sero-ai/plugin-signal-desk",
   "version": "0.1.1",
   "description": "RSS-first personal intelligence desk for Sero",
+  "type": "module",
   "license": "MIT",
   "files": [
     "dist",
